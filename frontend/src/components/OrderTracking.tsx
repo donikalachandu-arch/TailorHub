@@ -4,7 +4,7 @@ import { apiRequest } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import { useVoice } from '../context/VoiceContext';
 import { useLanguage } from '../context/LanguageContext';
-import { OrderStatus } from '../../../shared/types';
+import { OrderStatus } from '../types';
 
 export const OrderTracking: React.FC<{ orderId?: string; onBack?: () => void }> = ({ orderId, onBack }) => {
   const { user } = useAuth();

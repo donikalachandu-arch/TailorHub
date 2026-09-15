@@ -58,7 +58,7 @@ export class CloudStorageService {
             'Content-Type': mimeType,
             'x-upsert': 'true'
           },
-          body: buffer
+          body: buffer as unknown as BodyInit
         });
 
         if (uploadRes.ok) {

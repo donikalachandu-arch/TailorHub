@@ -3,7 +3,7 @@ import { Scissors, Volume2, VolumeX, Globe, LogOut, User as UserIcon, Shield, St
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useVoice } from '../context/VoiceContext';
-import { LanguageCode } from '../../../shared/types';
+import { LanguageCode } from '../types';
 import { apiRequest } from '../services/apiClient';
 
 export const Navbar: React.FC<{ onOpenLogin: () => void; activeTab: string; setActiveTab: (t: string) => void }> = ({

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, TailorProfile } from '../../../shared/types';
+import { User, TailorProfile } from '../types';
 import { apiRequest } from '../services/apiClient';
 
 interface AuthContextType {

@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../services/apiClient';
 import { useLanguage } from '../context/LanguageContext';
-import { ExtractedCustomerCandidate, OCRFieldConfidence, DuplicateMatchInfo } from '../../../shared/types';
+import { ExtractedCustomerCandidate, OCRFieldConfidence, DuplicateMatchInfo } from '../types';
 
 interface OldRecordScannerProps {
   onSuccess?: () => void;

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { LanguageCode } from '../../../shared/types';
+import { LanguageCode } from '../types';
 import enDict from '../locales/en.json';
 import teDict from '../locales/te.json';
 import hiDict from '../locales/hi.json';

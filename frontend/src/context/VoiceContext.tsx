@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import { LanguageCode } from '../../../shared/types';
+import { LanguageCode } from '../types';
 
 interface VoiceContextType {
   isVoiceEnabled: boolean;

@@ -1,5 +1,5 @@
 import { Database } from 'sqlite';
-import { ExtractedCustomerCandidate, OCRFieldConfidence, DuplicateMatchInfo, UpperBodyMeasurements, LowerBodyMeasurements } from '../../../shared/types';
+import { ExtractedCustomerCandidate, OCRFieldConfidence, DuplicateMatchInfo, UpperBodyMeasurements, LowerBodyMeasurements } from '../types';
 
 export interface OCRRawOutput {
   rawText: string;
