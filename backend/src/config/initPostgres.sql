@@ -1,0 +1,214 @@
+-- ==========================================================
+-- TAILORHUB COMPLETE POSTGRESQL / SUPABASE PRODUCTION SCHEMA
+-- Run this in the Supabase SQL Editor or your PostgreSQL Database
+-- ==========================================================
+
+-- 1. Users Table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT NOT NULL,
+  role VARCHAR(20) CHECK(role IN ('CUSTOMER', 'TAILOR', 'ADMIN')) NOT NULL,
+  language VARCHAR(10) DEFAULT 'en',
+  profile_image TEXT,
+  location TEXT,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Tailor Profiles Table
+CREATE TABLE IF NOT EXISTS tailor_profiles (
+  id TEXT PRIMARY KEY,
+  user_id TEXT UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shop_name TEXT NOT NULL,
+  description TEXT,
+  address TEXT NOT NULL,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  working_hours TEXT DEFAULT '9:00 AM - 8:00 PM',
+  rating DOUBLE PRECISION DEFAULT 5.0,
+  review_count INTEGER DEFAULT 0,
+  starting_price DOUBLE PRECISION DEFAULT 350.0,
+  shop_images TEXT DEFAULT '[]',
+  categories TEXT DEFAULT '[]',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. Services Offered by Tailors
+CREATE TABLE IF NOT EXISTS services (
+  id TEXT PRIMARY KEY,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  price DOUBLE PRECISION NOT NULL,
+  duration_days INTEGER DEFAULT 3,
+  category TEXT NOT NULL,
+  is_active INTEGER DEFAULT 1,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. Tailor-Customer Relationship
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. Measurement Profiles
+CREATE TABLE IF NOT EXISTS measurements (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_name TEXT NOT NULL,
+  garment_category TEXT NOT NULL,
+  measurement_data TEXT NOT NULL,
+  source VARCHAR(30) DEFAULT 'MANUAL',
+  version INTEGER DEFAULT 1,
+  is_default INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Measurement Audit History
+CREATE TABLE IF NOT EXISTS measurement_history (
+  id TEXT PRIMARY KEY,
+  measurement_id TEXT NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+  measurement_data TEXT NOT NULL,
+  changed_by TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. Stitching Orders
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  order_number TEXT UNIQUE NOT NULL,
+  customer_id TEXT NOT NULL REFERENCES users(id),
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id),
+  garment_type TEXT NOT NULL,
+  measurement_id TEXT NOT NULL REFERENCES measurements(id),
+  status VARCHAR(30) NOT NULL,
+  fabric_option VARCHAR(30) DEFAULT 'CUSTOMER_PROVIDED',
+  total_amount DOUBLE PRECISION NOT NULL,
+  advance_amount DOUBLE PRECISION NOT NULL,
+  balance_amount DOUBLE PRECISION NOT NULL,
+  delivery_date TEXT NOT NULL,
+  instructions TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8. Order Status History Tracking
+CREATE TABLE IF NOT EXISTS order_status_history (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status VARCHAR(30) NOT NULL,
+  changed_by TEXT NOT NULL,
+  changed_by_name TEXT,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 9. Scanned Register Records (TailorHub Lens OCR)
+CREATE TABLE IF NOT EXISTS scanned_records (
+  id TEXT PRIMARY KEY,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  image_url TEXT NOT NULL,
+  enhanced_image_url TEXT,
+  raw_ocr_text TEXT,
+  extracted_data TEXT,
+  status VARCHAR(30) DEFAULT 'PROCESSED',
+  confidence_score DOUBLE PRECISION DEFAULT 0.0,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 10. Historical Orders from Old Physical Books
+CREATE TABLE IF NOT EXISTS historical_orders (
+  id TEXT PRIMARY KEY,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  customer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  garment_type TEXT NOT NULL,
+  order_date TEXT,
+  amount DOUBLE PRECISION,
+  status VARCHAR(30) DEFAULT 'COMPLETED',
+  scanned_record_id TEXT REFERENCES scanned_records(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 11. Security & OCR Audit Logs
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  actor_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_entity TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  details TEXT,
+  ip_address TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 12. Fitting & Consultation Appointments
+CREATE TABLE IF NOT EXISTS appointments (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  service_id TEXT REFERENCES services(id),
+  appointment_date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  status VARCHAR(20) DEFAULT 'PENDING',
+  appointment_type VARCHAR(20) DEFAULT 'IN_SHOP',
+  address TEXT,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 13. Fabric Catalog
+CREATE TABLE IF NOT EXISTS fabrics (
+  id TEXT PRIMARY KEY,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  material TEXT NOT NULL,
+  color TEXT NOT NULL,
+  pattern TEXT,
+  price_per_meter DOUBLE PRECISION NOT NULL,
+  stock_meters DOUBLE PRECISION DEFAULT 10.0,
+  image_url TEXT,
+  is_available INTEGER DEFAULT 1,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 14. Customer Reviews
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY,
+  order_id TEXT UNIQUE NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tailor_id TEXT NOT NULL REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL,
+  comment TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+CREATE INDEX IF NOT EXISTS idx_tailor_profiles_user_id ON tailor_profiles(user_id);
+CREATE INDEX IF NOT EXISTS idx_services_tailor_id ON services(tailor_id);
+CREATE INDEX IF NOT EXISTS idx_customers_tailor_id ON customers(tailor_id);
+CREATE INDEX IF NOT EXISTS idx_customers_user_id ON customers(user_id);
+CREATE INDEX IF NOT EXISTS idx_measurements_customer_id ON measurements(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_tailor_id ON orders(tailor_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_scanned_records_tailor_id ON scanned_records(tailor_id);
+CREATE INDEX IF NOT EXISTS idx_historical_orders_tailor_id ON historical_orders(tailor_id);
+CREATE INDEX IF NOT EXISTS idx_historical_orders_customer_id ON historical_orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_tailor_id ON appointments(tailor_id);
