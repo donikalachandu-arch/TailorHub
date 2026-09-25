@@ -1,8 +1,17 @@
-# TAILORHUB
+# ✂️ TAILORHUB – Smart Digital Tailoring Platform & AI Lens
 
 > **“Your Tailor. Your Style. Your Digital Wardrobe.”**
 
-TAILORHUB is an AI-powered digital platform connecting customers with local tailors while providing tailors, boutiques, alteration shops, and tailoring MSMEs with a complete digital business-management ecosystem.
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Live%20Production%20App-brightgreen?logo=vercel&style=for-the-badge)](https://frontend-eight-orcin-49.vercel.app)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Full--Stack-blue?logo=typescript&style=for-the-badge)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](#)
+
+---
+
+## 🌐 🚀 Live Production Links
+
+- **🌍 Primary Vercel Cloud App**: **[https://frontend-eight-orcin-49.vercel.app](https://frontend-eight-orcin-49.vercel.app)**
+- **⚡ Alternate Cloud Link**: [https://frontend-5hlwwyhts-govikarshivpooja5-3944s-projects.vercel.app](https://frontend-5hlwwyhts-govikarshivpooja5-3944s-projects.vercel.app)
 
 ---
 
