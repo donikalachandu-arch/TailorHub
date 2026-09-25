@@ -8,65 +8,76 @@
 
 ---
 
+## 📖 About TailorHub
+
+**TailorHub** is an AI-powered smart digital platform engineered to bridge the gap between customers and local tailoring businesses while empowering master tailors, boutiques, and apparel MSMEs with a modern digital management operating system.
+
+Experience the live production application here:  
+👉 **[https://frontend-eight-orcin-49.vercel.app](https://frontend-eight-orcin-49.vercel.app)**
+
+Traditional tailoring shops across India manage decades of invaluable customer measurements, order histories, and fitting preferences in physical handwritten paper registers and notebooks. **TailorHub** transforms this centuries-old manual workflow into a streamlined, searchable, cloud-connected digital ecosystem featuring **TailorHub Lens** — an intelligent OCR & tailoring shorthand digitization engine.
+
+---
+
+## 📝 Project Description
+
+TailorHub provides two distinct, fully synchronized user portals built into a single progressive web application:
+
+### 1. ✂️ For Master Tailors & Boutiques
+- **TailorHub Lens (AI Record Digitization)**: Digitize decades of old handwritten tailoring registers using computer vision, binarization/deskew image filters, tailoring shorthand parsers (`Ch 40`, `W 34`, `Slv 25`, `Sh 18.5`), and multi-customer page segmentation.
+- **Customer Directory & Measurement Vault**: Centralized customer records with versioned measurement history, digitized notebook scan archives, and one-click order generation.
+- **Order Pipeline & Workflow Management**: Track garments through cutting, stitching, fitting, quality check, and ready stages with automated timeline logging.
+- **Revenue Analytics & Business Intelligence**: Monitor weekly/monthly revenue trends, top stitching services, advance balance collections, and repeat customer ratios.
+
+### 2. 🛍️ For Customers
+- **Local Tailor Discovery**: Locate nearby verified master tailors and boutiques with distance filters, ratings, category tags, price benchmarks, and Google Maps navigation.
+- **Digital Measurement Wardrobe**: Store reusable fitting profiles for shirts, pants, suits, kurtas, lehengas, and designer blouses with version tracking.
+- **AI Style Assistant**: Intelligent design recommendations for necklines, sleeve cuts, collar styling, pattern pairings, and occasion-specific outfit ideas.
+- **Live Order Tracking & Appointment Scheduler**: Real-time progress tracker from fabric delivery to final fitting pickup with multi-lingual audio announcements.
+
+---
+
 ## 🌐 🚀 Live Production Links
 
 - **🌍 Primary Vercel Cloud App**: **[https://frontend-eight-orcin-49.vercel.app](https://frontend-eight-orcin-49.vercel.app)**
 - **⚡ Alternate Cloud Link**: [https://frontend-5hlwwyhts-govikarshivpooja5-3944s-projects.vercel.app](https://frontend-5hlwwyhts-govikarshivpooja5-3944s-projects.vercel.app)
+- **💻 Local 1-Click Launcher**: Run `start-tailorhub.bat` on your local environment
 
 ---
 
-## 🌟 Core Differentiators & Highlights
+## 🌟 Core Modules & Capabilities
 
-1. **Old Book Digitization (Handwritten Register Scan)**: Scan physical tailor register books using AI OCR + handwriting recognition engine with field confidence scoring (Green high, Yellow/Red review) and human verification editor to create digital customer records.
-2. **Digital Measurement Vault**: Multi-profile storage for Shirts, Pants, Kurtas, Blouses & Suits with full version history tracking and optional AI Body Measurement estimation module.
-3. **Customer–Tailor Marketplace**: Search tailors by name, shop, location, or service; filter by Men, Women, Kids, Alterations, Rating, and Starting Price; integrated with phone dialer and Google Maps directions.
-4. **Appointment Booking System**: Service selection, date/time slot picker, real availability checking, and double-booking prevention.
-5. **Multi-Step Order Wizard & 11-Stage Status Tracking**: 10-step wizard generating human-readable order IDs (`TH-2026-000123`), 11-stage visual progress timeline, real-time WebSocket live sync.
-6. **Multilingual & Voice Support**: Complete UI localization in English, Telugu (తెలుగు), and Hindi (हिन्दी) with Web Speech Synthesis voice announcements.
-7. **Tailor Business Ecosystem & Analytics**: Real database analytics for weekly/monthly revenue trends, order stage breakdowns, service popularity, repeat customers, and admin super-control panel.
-8. **Razorpay Payment Gateway**: Backend transaction verification, advance/balance split, and receipt generation.
+1. **📸 TailorHub Lens (Handwritten Register Digitization)**:
+   - Live camera viewfinder (`getUserMedia`) + gallery image uploader.
+   - Contrast binarization, edge sharpening, and interactive deskew sliders.
+   - Tokenized tailoring shorthand parser with multi-customer segment candidate cards.
+   - Field-level confidence scores (🟢 $\ge 85\%$, 🟡 $60-84\%$, 🔴 $<60\%$).
+   - Smart Duplicate Customer Resolution (`[UPDATE EXISTING]`, `[CREATE NEW]`, `[CANCEL]`).
+
+2. **📏 Multi-Version Measurement Vault**:
+   - Universal measurements data structure with upper and lower body metrics.
+   - Measurement version history log preserving every past measurement modification.
+   - Direct integration into custom stitching order creation.
+
+3. **🧵 11-Stage Custom Order Pipeline**:
+   - Statuses: `ORDER_PLACED` → `ORDER_ACCEPTED` → `MEASUREMENT_CONFIRMED` → `FABRIC_RECEIVED` → `CUTTING` → `STITCHING` → `QUALITY_CHECK` → `READY` → `OUT_FOR_DELIVERY` → `COMPLETED`.
+   - Real-time WebSocket event synchronization.
+
+4. **🗣️ Multilingual UI & Voice Notifications**:
+   - English, Telugu (తెలుగు), and Hindi (हिन्दी) localization dictionaries.
+   - Web Speech Synthesis for spoken status alerts in selected regional languages.
 
 ---
 
-## 🚀 Quick Start Guide
+## 🔐 Demo Accounts & Test Credentials
 
-### Prerequisites
-- Node.js (v18.x or v20.x+)
-- npm (v9.x or v10.x+)
+| Role | Email | Password | Included Features |
+| :--- | :--- | :--- | :--- |
+| **Master Tailor** *(Default)* | `ramesh@tailors.com` | `password123` | **TailorHub Lens OCR**, Customer Vault, Measurement Versioning, Stitching Pipeline, Revenue Analytics |
+| **Customer** | `vikram@gmail.com` | `password123` | Tailor Discovery, AI Style Assistant, Custom Order Wizard, Digital Measurements Vault |
+| **Admin** | `admin@tailorhub.com` | `admin123` | Platform Analytics, Boutique Verification, System Health |
 
-### Installation
-
-```bash
-# Clone or navigate to the tailorhub directory
-cd tailorhub
-
-# Install backend dependencies
-cd backend
-npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
-```
-
-### Running Local Development
-
-```bash
-# 1. Run Backend Server (Port 5000)
-cd backend
-npm run dev
-
-# 2. Run Frontend Web App (Port 3000)
-cd frontend
-npm run dev
-```
-
-### Running Verification Tests
-
-```bash
-cd backend
-npm test
-```
+*(Use the **1-Click Role Switcher** buttons in the top navbar to instantly test any role!)*
 
 ---
 
@@ -76,36 +87,58 @@ npm test
 /tailorhub
 ├── /backend
 │   ├── /src
-│   │   ├── /config (database.ts, seed.ts)
+│   │   ├── /config (database.ts, seed.ts, initPostgres.sql)
 │   │   ├── /middleware (auth.ts - JWT & Role RBAC)
 │   │   ├── /routes (api.ts - REST & WebSockets)
+│   │   ├── /services (lensOcrService.ts, storageService.ts)
 │   │   └── server.ts
 │   ├── /test (api.test.ts)
-│   ├── tailorhub.db (SQLite database)
+│   ├── Dockerfile & render.yaml
 │   └── package.json
 ├── /frontend
 │   ├── /src
-│   │   ├── /components (Splash, Onboarding, CustomerDashboard, TailorDiscovery, MeasurementVault, OrderWizard, OrderTracking, OldRecordScanner, AIStyleAssistant, PaymentModal, TailorAnalytics, AdminDashboard)
+│   │   ├── /components (OldRecordScanner, TailorCustomerManagement, TailorDashboard, CustomerDashboard, MeasurementVault, OrderWizard, OrderTracking, AIStyleAssistant, TailorAnalytics, AdminDashboard)
 │   │   ├── /context (AuthContext, LanguageContext, VoiceContext)
 │   │   ├── /locales (en.json, te.json, hi.json)
 │   │   ├── /services (apiClient.ts)
 │   │   ├── App.tsx
 │   │   └── main.tsx
-│   ├── index.html
-│   ├── tailwind.config.js
+│   ├── index.html & vercel.json
 │   └── package.json
 ├── /shared
 │   └── types.ts
-├── .env.example
+├── DEPLOYMENT.md
+├── push-to-github.bat
+├── deploy-to-vercel.bat
+├── start-tailorhub.bat
 └── README.md
 ```
 
 ---
 
-## 🔐 Credentials & Quick Demo Logins
+## 🚀 Quick Start Guide
 
-| Role | Email | Password | Description |
-|---|---|---|---|
-| **Tailor** | `ramesh@tailors.com` | `password123` | Master Tailor Ramesh (Banjara Hills) |
-| **Customer** | `vikram@gmail.com` | `password123` | Vikram Reddy (Customer Wardrobe) |
-| **Admin** | `admin@tailorhub.com` | `admin123` | Platform Super Admin |
+### Prerequisites
+- Node.js (v18.x or v20.x+)
+- npm (v9.x or v10.x+)
+
+### Installation & Run Locally
+
+```bash
+# 1. Start Backend Server (Port 5000)
+cd backend
+npm install
+npm run dev
+
+# 2. Start Frontend UI (Port 3000)
+cd ../frontend
+npm install
+npm run dev
+```
+
+### Running Verification Tests
+
+```bash
+cd backend
+npm test
+```
