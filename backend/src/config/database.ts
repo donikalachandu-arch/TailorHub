@@ -305,6 +305,21 @@ async function initSchema(db: Database) {
       FOREIGN KEY (tailor_id) REFERENCES tailor_profiles(id)
     );
 
+    CREATE TABLE IF NOT EXISTS staff (
+      id TEXT PRIMARY KEY,
+      tailor_id TEXT NOT NULL,
+      user_id TEXT,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT,
+      role TEXT NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tailor_id) REFERENCES tailor_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS shop_holidays (
       id TEXT PRIMARY KEY,
       tailor_id TEXT NOT NULL,
@@ -319,6 +334,7 @@ async function initSchema(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number);
     CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
     CREATE INDEX IF NOT EXISTS idx_orders_tailor ON orders(tailor_id);
+    CREATE INDEX IF NOT EXISTS idx_staff_tailor ON staff(tailor_id);
     CREATE INDEX IF NOT EXISTS idx_appointments_tailor ON appointments(tailor_id, date);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
     CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id);

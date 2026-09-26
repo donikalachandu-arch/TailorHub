@@ -1,4 +1,27 @@
-export type UserRole = 'CUSTOMER' | 'TAILOR' | 'ADMIN';
+export type UserRole = 'CUSTOMER' | 'TAILOR' | 'STAFF' | 'SHOP_MANAGER' | 'ADMIN' | 'SUPER_ADMIN';
+
+export type StaffRole =
+  | 'MASTER_TAILOR'
+  | 'CUTTER'
+  | 'STITCHER'
+  | 'FINISHER'
+  | 'QUALITY_CONTROLLER'
+  | 'SALES'
+  | 'SHOP_MANAGER';
+
+export interface StaffMember {
+  id: string;
+  tailor_id: string;
+  user_id?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  role: StaffRole;
+  is_active: boolean;
+  assigned_orders_count?: number;
+  created_at: string;
+  updated_at?: string;
+}
 
 export type LanguageCode = 'en' | 'te' | 'hi';
 

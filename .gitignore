@@ -27,6 +27,7 @@ build/
 cloudflared.exe
 *.tar.gz
 *.zip
+*.traineddata
 
 # System & IDE
 .DS_Store

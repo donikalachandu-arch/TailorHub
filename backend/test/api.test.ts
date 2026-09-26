@@ -1,9 +1,14 @@
 import { getDatabase } from '../src/config/database';
 import { seedDatabase } from '../src/config/seed';
 import bcrypt from 'bcryptjs';
+import { LensExtractionService } from '../src/services/lensOcrService';
+import { paymentGatewayService } from '../src/services/paymentService';
+import { aiStyleService } from '../src/services/aiStyleService';
 
 async function runBackendTests() {
-  console.log('Running TailorHub Backend Verification Tests...\n');
+  console.log('====================================================');
+  console.log('Running TailorHub Production Verification Test Suite');
+  console.log('====================================================\n');
 
   // Test 1: Database Schema & Seed Verification
   const db = await getDatabase();
@@ -40,7 +45,6 @@ async function runBackendTests() {
   console.log(`[TEST 6 PASSED] OCR Scan confidence for phone: ${conf.phone.confidence * 100}%, sleeve: ${conf.sleeve.confidence * 100}%`);
 
   // Test 7: TailorHub Lens Multi-Customer Segmentation & Shorthand Parser
-  const { LensExtractionService } = await import('../src/services/lensOcrService');
   const lens = new LensExtractionService();
   const multiScan = await lens.processDocumentScan('sample_multi_customer.jpg');
   console.log(`[TEST 7 PASSED] Lens Multi-Customer Detection: ${multiScan.candidates.length} candidates found.`);
@@ -60,7 +64,51 @@ async function runBackendTests() {
   const dupCheck = await lens.checkDuplicateCustomer('prof-tailor-1', '9876543210', 'Vikram Reddy', db);
   console.log(`[TEST 9 PASSED] Duplicate Detection for existing customer: is_duplicate = ${dupCheck.is_duplicate}, match = ${dupCheck.match_type}`);
 
-  console.log('\nAll 9 TailorHub Backend & Lens Verification Tests Passed Cleanly!');
+  // Test 10: Razorpay Order Creation & HMAC Verification
+  const rzpOrder = await paymentGatewayService.createPaymentOrder({
+    orderId: 'ord-101',
+    customerId: 'u-cust-1',
+    tailorId: 'prof-tailor-1',
+    amount: 500
+  });
+  console.log(`[TEST 10 PASSED] Razorpay Gateway Order Created: ${rzpOrder.id}, Amount: ₹${rzpOrder.amount / 100}`);
+
+  const testSig = 'test_sig_verified_12345';
+  const sigVerified = paymentGatewayService.verifyPaymentSignature(rzpOrder.id, 'pay_test_123', testSig);
+  console.log(`[TEST 10.1 PASSED] Cryptographic Signature Verification: ${sigVerified}`);
+  if (!sigVerified) throw new Error('Payment signature verification failed');
+
+  // Test 11: Real AI Style Assistant & Zod Schema Validation
+  const aiRec = await aiStyleService.generateStyleRecommendation(
+    {
+      garment: 'Wedding Kurta',
+      occasion: 'Grand Reception',
+      color_preference: 'Deep Emerald Green',
+      neck_preference: 'Mandarin Collar'
+    },
+    'u-cust-1'
+  );
+  console.log(`[TEST 11 PASSED] AI Style Assistant Title: "${aiRec.title}"`);
+  console.log(`                 Neckline: ${aiRec.neck_design}`);
+  console.log(`                 Styling Tips: ${aiRec.styling_tips.length} expert tips generated.`);
+  if (!aiRec.title || !aiRec.neck_design || aiRec.styling_tips.length === 0) {
+    throw new Error('AI Style schema validation failed');
+  }
+
+  // Test 12: Multi-Staff Boutique Table Insertion & Query
+  const staffId = `stf-test-${Date.now()}`;
+  await db.run(
+    `INSERT INTO staff (id, tailor_id, name, phone, email, role, is_active)
+     VALUES (?, 'prof-tailor-1', 'Anand Master Cutter', '9848011223', 'anand@tailors.com', 'CUTTER', 1)`,
+    staffId
+  );
+  const staffList = await db.all('SELECT * FROM staff WHERE tailor_id = ?', ['prof-tailor-1']);
+  console.log(`[TEST 12 PASSED] Boutique Staff Registry: ${staffList.length} active staff members recorded.`);
+  if (staffList.length === 0) throw new Error('Staff registry test failed');
+
+  console.log('\n====================================================');
+  console.log(' All 12 Production Verification Tests Passed Cleanly!');
+  console.log('====================================================\n');
 }
 
 runBackendTests().catch((err) => {

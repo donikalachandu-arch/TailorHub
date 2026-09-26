@@ -5,25 +5,49 @@ import { getDatabase } from '../config/database';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { WebSocket } from 'ws';
 import { LensExtractionService } from '../services/lensOcrService';
+import { paymentGatewayService } from '../services/paymentService';
+import { aiStyleService } from '../services/aiStyleService';
+import { OrderStatus } from '../types';
 
 export const apiRouter = Router();
 
 const lensService = new LensExtractionService();
 const JWT_SECRET = process.env.JWT_SECRET || 'tailorhub_super_secret_jwt_key_2026_production';
-let activeWebsocketClients: Set<WebSocket> = new Set();
+let activeWebsocketClients: Set<any> = new Set();
 
-export function setWebSocketClients(clients: Set<WebSocket>) {
+export function setWebSocketClients(clients: Set<any>) {
   activeWebsocketClients = clients;
 }
 
-function broadcastRealtimeEvent(type: string, data: any) {
-  const payload = JSON.stringify({ type, data, timestamp: new Date().toISOString() });
+export function broadcastWebSocketEvent(room: string | null, type: string, data: any) {
+  const payload = JSON.stringify({ room, type, data, timestamp: new Date().toISOString() });
   for (const client of activeWebsocketClients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(payload);
+      if (!room || (client.rooms && client.rooms.has(room))) {
+        client.send(payload);
+      }
     }
   }
 }
+
+function broadcastRealtimeEvent(type: string, data: any) {
+  broadcastWebSocketEvent(null, type, data);
+}
+
+// 11-Stage Strict Order Workflow State Machine
+const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  ORDER_PLACED: ['ORDER_ACCEPTED', 'CANCELLED'],
+  ORDER_ACCEPTED: ['MEASUREMENT_CONFIRMED', 'CANCELLED'],
+  MEASUREMENT_CONFIRMED: ['FABRIC_RECEIVED', 'CUTTING', 'CANCELLED'],
+  FABRIC_RECEIVED: ['CUTTING', 'CANCELLED'],
+  CUTTING: ['STITCHING', 'CANCELLED'],
+  STITCHING: ['QUALITY_CHECK'],
+  QUALITY_CHECK: ['READY', 'STITCHING'], // Can re-stitch if defect
+  READY: ['OUT_FOR_DELIVERY', 'COMPLETED'],
+  OUT_FOR_DELIVERY: ['COMPLETED'],
+  COMPLETED: [],
+  CANCELLED: []
+};
 
 // -------------------------------------------------------------
 // 1. AUTHENTICATION & PROFILE
@@ -543,17 +567,34 @@ apiRouter.patch('/orders/:id/status', authenticateToken, async (req: Authenticat
     const { status, notes } = req.body;
     const db = await getDatabase();
 
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    const currentStatus = order.status as OrderStatus;
+    const allowedNext = VALID_ORDER_TRANSITIONS[currentStatus] || [];
+
+    // Allow Admin override, otherwise validate transition
+    if (req.user?.role !== 'ADMIN' && !allowedNext.includes(status as OrderStatus)) {
+      return res.status(400).json({
+        error: `Invalid status transition from '${currentStatus}' to '${status}'. Allowed next states: [${allowedNext.join(', ')}]`
+      });
+    }
+
     await db.run('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [status, req.params.id]);
 
     await db.run(
       `INSERT INTO order_status_history (id, order_id, status, changed_by, changed_by_name, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [`h-${Date.now()}`, req.params.id, status, req.user!.id, req.user!.name, notes || `Status changed to ${status}`]
+      [`h-${Date.now()}`, req.params.id, status, req.user!.id, req.user!.name, notes || `Status transitioned to ${status}`]
     );
 
-    broadcastRealtimeEvent('ORDER_STATUS_UPDATE', { orderId: req.params.id, status, notes });
+    broadcastWebSocketEvent(`order:${req.params.id}`, 'ORDER_STATUS_UPDATE', { orderId: req.params.id, status, notes });
+    broadcastWebSocketEvent(`shop:${order.tailor_id}`, 'ORDER_STATUS_UPDATE', { orderId: req.params.id, status, notes });
+    broadcastWebSocketEvent(null, 'ORDER_STATUS_UPDATE', { orderId: req.params.id, status, notes });
 
-    res.json({ message: 'Order status updated', status });
+    res.json({ message: 'Order status updated', status, previous_status: currentStatus });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1106,43 +1147,162 @@ apiRouter.patch('/old-records/:id/verify', authenticateToken, async (req: Authen
 });
 
 // -------------------------------------------------------------
-// 7. AI STYLE ASSISTANT
+// -------------------------------------------------------------
+// 7. REAL AI STYLE ASSISTANT (GEMINI LLM + BESPOKE TAILORING ONTOLOGY)
 // -------------------------------------------------------------
 apiRouter.post('/ai/style-recommendation', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { garment, occasion, color_preference, sleeve_preference, neck_preference, fit_preference } = req.body;
+    const { garment, occasion, color_preference, sleeve_preference, neck_preference, fit_preference, notes, order_id } = req.body;
+    const db = await getDatabase();
 
-    const recommendation = {
-      title: `Recommended ${garment || 'Garment'} Styling for ${occasion || 'Special Occasion'}`,
-      neck_design: neck_preference || (garment === 'Blouse' ? 'Deep U-Neck with Golden Zari Piping' : 'Mandarin Collar with Concealed Placket'),
-      sleeve_design: sleeve_preference || (garment === 'Shirt' ? 'Structured French Cuff' : 'Elbow-length sleeve with embroidered border'),
-      pattern_suggestion: 'Subtle self-texture weave with contrasting thread accents',
-      color_combination: color_preference ? `${color_preference} with metallic brass highlights` : 'Royal Indigo with Antique Gold',
-      occasion_suitability: `Ideal for ${occasion || 'Weddings & Festive gatherings'}, providing a sharp startup-grade tailored aesthetic.`,
-      styling_tips: [
-        'Pair with tapered tailored trousers for a clean silhouette.',
-        'Keep pocket square minimal to emphasize collar stitching.',
-        'Allow 0.5 inch cuff reveal under blazer.'
-      ]
+    const inputData = {
+      garment: garment || 'Shirt',
+      occasion: occasion || 'Casual',
+      color_preference,
+      sleeve_preference,
+      neck_preference,
+      fit_preference,
+      notes
     };
 
-    const db = await getDatabase();
-    const id = `ai-${Date.now()}`;
-    await db.run(
-      `INSERT INTO ai_recommendations (id, customer_id, input_data, recommendation)
-       VALUES (?, ?, ?, ?)`,
-      [id, req.user!.id, JSON.stringify(req.body), JSON.stringify(recommendation)]
+    const structuredRecommendation = await aiStyleService.generateStyleRecommendation(
+      inputData,
+      req.user!.id,
+      order_id
     );
 
-    res.json({ id, recommendation });
+    const savedRec = await aiStyleService.saveRecommendation(
+      db,
+      req.user!.id,
+      order_id,
+      inputData,
+      structuredRecommendation
+    );
+
+    res.status(201).json({
+      id: savedRec.id,
+      recommendation: structuredRecommendation,
+      input_data: inputData,
+      created_at: savedRec.created_at
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate style recommendation' });
+  }
+});
+
+// -------------------------------------------------------------
+// 8. REAL RAZORPAY PAYMENT GATEWAY & SECURE WEBHOOKS
+// -------------------------------------------------------------
+apiRouter.post('/payments/create-order', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { order_id, amount } = req.body;
+    if (!order_id || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Valid order_id and amount are required.' });
+    }
+
+    const db = await getDatabase();
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [order_id]);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    const rzpOrder = await paymentGatewayService.createPaymentOrder({
+      orderId: order_id,
+      customerId: req.user!.id,
+      tailorId: order.tailor_id,
+      amount: Number(amount),
+      notes: { orderNumber: order.order_number }
+    });
+
+    res.status(201).json({
+      razorpay_order_id: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
+      key_id: rzpOrder.key_id,
+      order_id
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Payment order creation failed' });
+  }
+});
+
+apiRouter.post('/payments/verify-signature', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
+    const db = await getDatabase();
+
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [order_id]);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    const isValid = paymentGatewayService.verifyPaymentSignature(
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature
+    );
+
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid payment signature. Verification failed.' });
+    }
+
+    const paymentRecord = await paymentGatewayService.processSuccessfulPayment(db, {
+      orderId: order_id,
+      customerId: req.user!.id,
+      tailorId: order.tailor_id,
+      amount: Number(amount) || order.total_amount,
+      transactionId: razorpay_payment_id,
+      paymentMethod: 'RAZORPAY'
+    });
+
+    broadcastWebSocketEvent(`order:${order_id}`, 'PAYMENT_RECEIVED', paymentRecord);
+    broadcastWebSocketEvent(`shop:${order.tailor_id}`, 'PAYMENT_RECEIVED', paymentRecord);
+
+    res.status(200).json({
+      message: 'Payment verified and credited successfully',
+      payment: paymentRecord
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Signature verification failed' });
+  }
+});
+
+apiRouter.post('/payments/webhook', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const signature = req.headers['x-razorpay-signature'] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    if (process.env.RAZORPAY_WEBHOOK_SECRET) {
+      const isValid = paymentGatewayService.verifyWebhookSignature(rawBody, signature);
+      if (!isValid) {
+        return res.status(400).json({ error: 'Invalid webhook signature.' });
+      }
+    }
+
+    const event = req.body.event;
+    if (event === 'payment.captured') {
+      const paymentEntity = req.body.payload?.payment?.entity;
+      if (paymentEntity && paymentEntity.notes?.orderId) {
+        const db = await getDatabase();
+        const order = await db.get('SELECT * FROM orders WHERE id = ?', [paymentEntity.notes.orderId]);
+        if (order) {
+          await paymentGatewayService.processSuccessfulPayment(db, {
+            orderId: order.id,
+            customerId: order.customer_id,
+            tailorId: order.tailor_id,
+            amount: paymentEntity.amount / 100,
+            transactionId: paymentEntity.id,
+            paymentMethod: 'RAZORPAY'
+          });
+        }
+      }
+    }
+
+    res.status(200).json({ status: 'ok', received: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// 8. PAYMENTS & RAZORPAY INTEGRATION
-// -------------------------------------------------------------
+// Backward-compatible record payment endpoint
 apiRouter.post('/payments/create', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { order_id, amount, payment_method } = req.body;
@@ -1151,32 +1311,68 @@ apiRouter.post('/payments/create', authenticateToken, async (req: AuthenticatedR
     const order = await db.get('SELECT * FROM orders WHERE id = ?', [order_id]);
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
-    const paymentId = `pay-${Date.now()}`;
-    const transactionId = `txn_rzp_${Math.floor(10000000 + Math.random() * 90000000)}`;
-
-    await db.run(
-      `INSERT INTO payments (id, order_id, customer_id, tailor_id, amount, transaction_id, payment_method, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'SUCCESS')`,
-      [paymentId, order_id, req.user!.id, order.tailor_id, amount, transactionId, payment_method || 'RAZORPAY']
-    );
-
-    // Update order balance
-    const newAdvance = order.advance_amount + amount;
-    const newBalance = Math.max(0, order.total_amount - newAdvance);
-
-    await db.run(
-      'UPDATE orders SET advance_amount = ?, balance_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [newAdvance, newBalance, order_id]
-    );
+    const paymentRecord = await paymentGatewayService.processSuccessfulPayment(db, {
+      orderId: order_id,
+      customerId: req.user!.id,
+      tailorId: order.tailor_id,
+      amount: Number(amount),
+      transactionId: `txn_${Date.now()}`,
+      paymentMethod: payment_method || 'CASH'
+    });
 
     res.status(201).json({
       message: 'Payment verified and recorded',
-      paymentId,
-      transactionId,
-      amount,
-      newAdvance,
-      newBalance
+      paymentId: paymentRecord.id,
+      transactionId: paymentRecord.transaction_id,
+      amount: paymentRecord.amount
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 8.5. MULTI-STAFF & BOUTIQUE PERMISSIONS MANAGEMENT
+// -------------------------------------------------------------
+apiRouter.get('/tailors/:tailorId/staff', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const db = await getDatabase();
+    const staffMembers = await db.all(
+      `SELECT * FROM staff WHERE tailor_id = ? ORDER BY is_active DESC, name ASC`,
+      [req.params.tailorId]
+    );
+    res.json({ staff: staffMembers });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/tailors/:tailorId/staff', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, phone, email, role } = req.body;
+    if (!name || !phone || !role) {
+      return res.status(400).json({ error: 'Staff name, phone, and role are required.' });
+    }
+
+    const db = await getDatabase();
+    const staffId = `stf-${Date.now()}`;
+    await db.run(
+      `INSERT INTO staff (id, tailor_id, name, phone, email, role, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [staffId, req.params.tailorId, name.trim(), phone.trim(), email || '', role]
+    );
+
+    res.status(201).json({ message: 'Staff member added successfully', staffId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/tailors/:tailorId/staff/:staffId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const db = await getDatabase();
+    await db.run('DELETE FROM staff WHERE id = ? AND tailor_id = ?', [req.params.staffId, req.params.tailorId]);
+    res.json({ message: 'Staff member removed successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
