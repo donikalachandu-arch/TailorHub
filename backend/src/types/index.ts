@@ -367,6 +367,7 @@ export interface AIStyleInput {
   sleeve_preference?: string;
   neck_preference?: string;
   fit_preference?: string;
+  fabric?: string;
   notes?: string;
 }
 

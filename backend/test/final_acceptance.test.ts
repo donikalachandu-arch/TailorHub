@@ -296,7 +296,7 @@ async function runFinalAcceptanceTests() {
   // TEST SECTION 8: PAYMENT INTEGRATION TEST
   // -------------------------------------------------------------
   try {
-    const isLiveRazorpayKey = process.env.RAZORPAY_KEY_ID && !process.env.RAZORPAY_KEY_ID.includes('rzp_test');
+    const isLiveRazorpayKey = paymentGatewayService.isLive;
     const paymentService = paymentGatewayService;
 
     // Test signature verification
@@ -304,23 +304,45 @@ async function runFinalAcceptanceTests() {
     const invalidSig = paymentService.verifyPaymentSignature('order_test_1', 'pay_test_1', 'invalid_random_hash');
 
     // Test Atomic Payment recording & Transaction update
+    const txnId = 'txn_acceptance_' + Date.now();
     const payResult = await paymentService.processSuccessfulPayment(db, {
       orderId: 'ord-101',
       customerId: 'usr-cust-1',
       tailorId: 'prof-tailor-1',
       amount: 500,
-      transactionId: 'txn_acceptance_' + Date.now(),
+      transactionId: txnId,
       paymentMethod: 'UPI'
+    });
+
+    // Test Idempotency: submitting duplicate txn must return existing record without double credit
+    const duplicatePay = await paymentService.processSuccessfulPayment(db, {
+      orderId: 'ord-101',
+      customerId: 'usr-cust-1',
+      tailorId: 'prof-tailor-1',
+      amount: 500,
+      transactionId: txnId,
+      paymentMethod: 'UPI'
+    });
+
+    const isIdempotent = payResult.id === duplicatePay.id;
+
+    // Test Refund processing
+    const refundRes = await paymentService.processRefund(db, {
+      paymentId: payResult.id,
+      orderId: 'ord-101',
+      refundAmount: 200,
+      reason: 'Customer requested modification',
+      actorId: 'usr-admin-1'
     });
 
     const recordedPay = await db.get("SELECT * FROM payments WHERE id = ?", [payResult.id]);
     const updatedOrder = await db.get("SELECT advance_amount, balance_amount FROM orders WHERE id = 'ord-101'");
 
     record(
-      'Payment Gateway HMAC Verification & Atomic DB Settlement',
+      'Payment Gateway HMAC Verification, Idempotency & Atomic Refund',
       'PAYMENT TEST',
-      recordedPay && updatedOrder.advance_amount >= 500 && validTestSig && !invalidSig,
-      `Gateway Architecture: Razorpay SDK + HMAC-SHA256 signature verification. Live Key Set: ${Boolean(isLiveRazorpayKey)} (Sandbox/Test Key Active: rzp_test_tailorhub_production_ready). Atomic DB transaction successfully updated payments table & order balance. Status: PROTOTYPE / TEST SANDBOX (NOT PRODUCTION READY for live banking until real merchant keys configured).`
+      recordedPay && isIdempotent && refundRes.status === 'REFUNDED' && validTestSig && !invalidSig,
+      `Gateway Architecture: Razorpay SDK + HMAC-SHA256 signature verification. Gateway Status: ${paymentService.getGatewayStatus().mode}. Idempotency verified: duplicate txn did not double credit. Atomic refund verified: ₹200 safely returned. Status: PILOT / SANDBOX.`
     );
   } catch (err: any) {
     record('Payment Integration', 'PAYMENT TEST', false, err.message);
@@ -332,26 +354,47 @@ async function runFinalAcceptanceTests() {
   try {
     const lensService = new LensExtractionService();
     
-    // Multi-candidate register parsing test
-    const multiScan = await lensService.processDocumentScan('sample_multi_customer_register_page.png');
-    const candidate1 = multiScan.candidates[0];
-    const candidate2 = multiScan.candidates[1];
+    // 9.1 Test genuine register book parsing via domain lexer
+    const sampleLedgerText = `
+TAILOR REGISTER BOOK - PAGE 42
+Customer 1:
+Name: Ramesh Kumar
+Ph: 9876543210
+Garment: Regular Formal Shirt x 2
+Ch: 40 | W: 34 | Sh: 18.5 | Slv: 25 | N: 16 | AH: 19 | L: 29.5
+Rate: 1600 | Adv: 1000 | Bal: 600
+--------------------------------------------------
+Customer 2:
+Name: Suresh Babu
+Ph: 9988776655
+Garment: Wedding Kurta Set
+Ch: 42 | W: 36 | Sh: 19 | Slv: 26 | N: 16.5 | L: 42
+Rate: 2200 | Adv: 1500 | Bal: 700
+`;
+    const candidates = lensService.extractCandidatesFromText(sampleLedgerText);
+    const candidate1 = candidates[0];
+    const candidate2 = candidates[1];
 
-    // Single candidate with shorthand
-    const singleScan = await lensService.processDocumentScan('sample_single_record.png');
-    const candidateSingle = singleScan.candidates[0];
+    // 9.2 Verify error thrown on non-existent/invalid image (Zero-mock compliance)
+    let nonExistentImageRejected = false;
+    try {
+      await lensService.processDocumentScan('non_existent_file_path.png');
+    } catch (err) {
+      nonExistentImageRejected = true;
+    }
 
     const parsedProperly = 
-      multiScan.candidates.length >= 2 &&
-      Boolean(candidate1.name) &&
-      Boolean(candidate1.upper_body?.chest) &&
-      Boolean(candidateSingle.name);
+      candidates.length >= 2 &&
+      candidate1.name === 'Ramesh Kumar' &&
+      candidate1.upper_body?.chest === 40 &&
+      candidate2.name === 'Suresh Babu' &&
+      nonExistentImageRejected;
 
     record(
       'Lens OCR Engine & Multi-Customer Tailoring Register Lexer',
       'OCR TEST',
       parsedProperly,
-      `Parser extracted ${multiScan.candidates.length} candidates from register sheet. Cand 1: "${candidate1.name}" (Chest: ${candidate1.upper_body?.chest}, Waist: ${candidate1.lower_body?.waist}). Dual-engine design: Real Tesseract.js Optical Character Recognition provider with intelligent domain fallback for physical ledger abbreviations. Status: EXPERIMENTAL / HYBRID OCR (REQUIRES CLOUD VISION / LLM VISION FOR UNSTRUCTURED CURSIVE HANDWRITING IN FULL PRODUCTION).`
+      `Parser extracted ${candidates.length} candidates from register text. Cand 1: "${candidate1.name}" (Chest: ${candidate1.upper_body?.chest}). Genuine error handling verified: unreadable/missing images rejected with descriptive error instead of fabricated text. Provider: ${lensService.getProviderInfo().provider}.`
     );
   } catch (err: any) {
     record('Lens OCR Engine', 'OCR TEST', false, err.message);

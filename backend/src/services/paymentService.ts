@@ -29,11 +29,20 @@ export class PaymentGatewayService {
   private keyId: string;
   private keySecret: string;
   private webhookSecret: string;
+  public readonly isLive: boolean;
 
   constructor() {
     this.keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_tailorhub_production_ready';
     this.keySecret = process.env.RAZORPAY_KEY_SECRET || 'tailorhub_razorpay_secret_key_2026';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'tailorhub_webhook_secret_2026';
+
+    // A live key never starts with 'rzp_test' and must have a real keySecret
+    this.isLive = Boolean(
+      process.env.RAZORPAY_KEY_ID &&
+      !process.env.RAZORPAY_KEY_ID.startsWith('rzp_test_') &&
+      process.env.RAZORPAY_KEY_SECRET &&
+      !process.env.RAZORPAY_KEY_SECRET.includes('secret_key_2026')
+    );
 
     if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
       try {
@@ -48,12 +57,30 @@ export class PaymentGatewayService {
   }
 
   /**
+   * Returns current operational status of the payment gateway
+   */
+  getGatewayStatus(): {
+    mode: 'LIVE' | 'PILOT/SANDBOX';
+    isLive: boolean;
+    provider: 'Razorpay';
+    keyPrefix: string;
+  } {
+    return {
+      mode: this.isLive ? 'LIVE' : 'PILOT/SANDBOX',
+      isLive: this.isLive,
+      provider: 'Razorpay',
+      keyPrefix: this.keyId ? this.keyId.substring(0, 8) + '...' : 'none'
+    };
+  }
+
+  /**
    * Create Razorpay Order
+   * Amount is in INR and converted to paise server-side
    */
   async createPaymentOrder(params: CreateOrderParams): Promise<RazorpayOrderResponse> {
     const amountInPaise = Math.round(params.amount * 100);
 
-    if (this.razorpayInstance) {
+    if (this.razorpayInstance && this.isLive) {
       try {
         const order = await this.razorpayInstance.orders.create({
           amount: amountInPaise,
@@ -70,11 +97,11 @@ export class PaymentGatewayService {
           key_id: this.keyId
         };
       } catch (err) {
-        console.warn('[PaymentService] Direct Razorpay order creation failed, generating signed gateway order:', err);
+        console.warn('[PaymentService] Live Razorpay order creation failed, fallback to sandbox:', err);
       }
     }
 
-    // High reliability secure test/sandbox order generation
+    // High reliability sandbox / test order generation for pilot
     const mockRzpOrderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     return {
       id: mockRzpOrderId,
@@ -136,6 +163,7 @@ export class PaymentGatewayService {
 
   /**
    * Record payment in Database and update Order balance atomically
+   * Includes idempotency check to prevent duplicate ledger writes on webhook retries
    */
   async processSuccessfulPayment(
     db: Database,
@@ -148,13 +176,24 @@ export class PaymentGatewayService {
       paymentMethod: 'RAZORPAY' | 'UPI' | 'CARD' | 'CASH';
     }
   ): Promise<PaymentRecord> {
+    // 1. Idempotency Check: Don't process the same transaction ID twice
+    const existing = await db.get(
+      'SELECT * FROM payments WHERE transaction_id = ?',
+      [paymentData.transactionId]
+    );
+
+    if (existing) {
+      console.log(`[PaymentService] Idempotency: Transaction ${paymentData.transactionId} already processed.`);
+      return existing as PaymentRecord;
+    }
+
     const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
     await db.run('BEGIN TRANSACTION;');
 
     try {
-      // 1. Insert into payments table
+      // 2. Insert into payments table
       await db.run(
         `INSERT INTO payments (id, order_id, customer_id, tailor_id, amount, transaction_id, payment_method, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -169,7 +208,7 @@ export class PaymentGatewayService {
         now
       );
 
-      // 2. Fetch order and calculate new balance
+      // 3. Fetch order and calculate new balance
       const order = await db.get('SELECT * FROM orders WHERE id = ?', paymentData.orderId);
       if (order) {
         const newAdvance = (order.advance_amount || 0) + paymentData.amount;
@@ -185,7 +224,7 @@ export class PaymentGatewayService {
           paymentData.orderId
         );
 
-        // 3. Add order status history log
+        // 4. Add order status history log
         const histId = `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         await db.run(
           `INSERT INTO order_status_history (id, order_id, status, changed_by, changed_by_name, notes, created_at)
@@ -213,6 +252,72 @@ export class PaymentGatewayService {
         status: 'SUCCESS',
         created_at: now
       };
+    } catch (err) {
+      await db.run('ROLLBACK;');
+      throw err;
+    }
+  }
+
+  /**
+   * Process refund atomically
+   */
+  async processRefund(
+    db: Database,
+    refundData: {
+      paymentId: string;
+      orderId: string;
+      refundAmount: number;
+      reason: string;
+      actorId: string;
+    }
+  ): Promise<{ status: string; refundedAmount: number }> {
+    const now = new Date().toISOString();
+    await db.run('BEGIN TRANSACTION;');
+
+    try {
+      const payment = await db.get('SELECT * FROM payments WHERE id = ?', refundData.paymentId);
+      if (!payment) {
+        throw new Error('Payment record not found.');
+      }
+
+      // Update payment status
+      await db.run(
+        "UPDATE payments SET status = 'REFUNDED', created_at = ? WHERE id = ?",
+        now,
+        refundData.paymentId
+      );
+
+      // Re-adjust order balance
+      const order = await db.get('SELECT * FROM orders WHERE id = ?', refundData.orderId);
+      if (order) {
+        const newAdvance = Math.max(0, (order.advance_amount || 0) - refundData.refundAmount);
+        const newBalance = Math.min(order.total_amount, (order.balance_amount || 0) + refundData.refundAmount);
+
+        await db.run(
+          'UPDATE orders SET advance_amount = ?, balance_amount = ?, updated_at = ? WHERE id = ?',
+          newAdvance,
+          newBalance,
+          now,
+          refundData.orderId
+        );
+
+        // Status history log
+        const histId = `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        await db.run(
+          `INSERT INTO order_status_history (id, order_id, status, changed_by, changed_by_name, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          histId,
+          refundData.orderId,
+          order.status,
+          refundData.actorId,
+          'System Refund',
+          `Refund of ₹${refundData.refundAmount} issued. Reason: ${refundData.reason}`,
+          now
+        );
+      }
+
+      await db.run('COMMIT;');
+      return { status: 'REFUNDED', refundedAmount: refundData.refundAmount };
     } catch (err) {
       await db.run('ROLLBACK;');
       throw err;

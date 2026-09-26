@@ -6,6 +6,7 @@ export interface OCRRawOutput {
   rawText: string;
   provider: string;
   lines: Array<{ text: string; confidence: number }>;
+  isAiVision?: boolean;
 }
 
 export interface LensOCRProvider {
@@ -13,8 +14,108 @@ export interface LensOCRProvider {
 }
 
 /**
+ * Production Multimodal Vision OCR Provider (Google Gemini 1.5 Flash)
+ * Specialized for difficult, cursive, and regional language handwritten tailoring registers.
+ */
+export class GeminiVisionOCRProvider implements LensOCRProvider {
+  private apiKey: string;
+
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
+  }
+
+  async extractText(imageUrlOrBase64: string): Promise<OCRRawOutput> {
+    if (!this.apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured for Gemini Multimodal Vision OCR.');
+    }
+
+    let mimeType = 'image/jpeg';
+    let base64Data = imageUrlOrBase64;
+
+    if (imageUrlOrBase64.startsWith('data:image')) {
+      const match = imageUrlOrBase64.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      }
+    }
+
+    const prompt = `You are a computer vision specialist transcribing physical tailoring register books and handwritten order slips.
+Transcribe all text from this tailoring notebook/record sheet verbatim.
+Identify:
+1. Customer names and phone numbers
+2. Garment types (Shirt, Pant, Kurta, Blouse, Suit, etc.)
+3. All handwritten body measurements (Chest, Waist, Shoulder, Sleeve, Neck, Armhole, Length, Hip, Bottom, etc.)
+4. Pricing (Total Rate, Advance, Balance)
+5. Delivery dates and stitching instructions.
+
+Output ONLY the raw transcription line by line as written on the page. Do not include markdown codeblocks or conversational filler.`;
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: mimeType,
+                      data: base64Data
+                    }
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.1
+            }
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Gemini Vision API error (${response.status}): ${errText}`);
+      }
+
+      const data = await response.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      if (!rawText.trim()) {
+        throw new Error('Gemini Vision returned empty text from the provided image.');
+      }
+
+      const lines = rawText
+        .split('\n')
+        .map((l: string) => l.trim())
+        .filter((l: string) => l.length > 0)
+        .map((text: string) => ({
+          text,
+          confidence: text.includes('?') ? 0.65 : 0.95
+        }));
+
+      return {
+        rawText,
+        provider: 'Google Gemini 1.5 Flash Multimodal Vision',
+        lines,
+        isAiVision: true
+      };
+    } catch (err: any) {
+      console.error('[GeminiVisionOCRProvider] Error:', err);
+      throw err;
+    }
+  }
+}
+
+/**
  * Real Tesseract.js OCR Computer Vision Provider
  * Extracts actual text from uploaded images, documents, and physical tailoring register books.
+ * Does NOT generate fake text based on filenames.
  */
 export class TesseractOCRProvider implements LensOCRProvider {
   async extractText(imageUrlOrBase64: string): Promise<OCRRawOutput> {
@@ -32,114 +133,33 @@ export class TesseractOCRProvider implements LensOCRProvider {
       await worker.terminate();
 
       const rawData = ret.data as any;
-      const lines = ((rawData.lines || []) as any[]).map((l: any) => ({
-        text: String(l.text || '').trim(),
-        confidence: (Number(l.confidence) || 90) / 100
-      })).filter((l: any) => l.text.length > 0);
+      const lines = ((rawData.lines || []) as any[])
+        .map((l: any) => ({
+          text: String(l.text || '').trim(),
+          confidence: (Number(l.confidence) || 85) / 100
+        }))
+        .filter((l: any) => l.text.length > 0);
 
       const rawText = (ret.data.text || '').trim();
 
-      // If Tesseract extracted real text, return it
-      if (rawText.length > 10) {
+      if (rawText.length >= 5) {
         return {
           rawText,
           provider: 'Tesseract.js Neural Optical Character Recognition v5.0',
-          lines
+          lines,
+          isAiVision: false
         };
       }
-    } catch (err) {
-      console.warn('[TesseractOCRProvider] Direct OCR parsing warning, using enhanced tailoring heuristic:', err);
+
+      throw new Error(
+        'Tesseract OCR was unable to detect recognizable text. Please ensure the image is clear, well-lit, and in focus.'
+      );
+    } catch (err: any) {
+      console.warn('[TesseractOCRProvider] Direct OCR parsing failure:', err.message);
+      throw new Error(
+        `OCR Processing Failed: ${err.message || 'Unable to read text from image. Please ensure the document is clear and legible.'}`
+      );
     }
-
-    // Fallback to pattern engine if image is synthetic/demo or extraction was empty
-    const fallback = new BuiltInTailoringOCRProvider();
-    return fallback.extractText(imageUrlOrBase64);
-  }
-}
-
-// Built-in Intelligent Tailoring Vision Engine with Sample Document Synthesizer & Pattern Recognizer
-export class BuiltInTailoringOCRProvider implements LensOCRProvider {
-  async extractText(imageUrlOrBase64: string): Promise<OCRRawOutput> {
-    let rawText = '';
-
-    if (imageUrlOrBase64.includes('multi_customer') || imageUrlOrBase64.includes('sample2')) {
-      rawText = `
-TAILOR REGISTER BOOK - PAGE 42
---------------------------------------------------
-Customer 1:
-Name: Ramesh Kumar
-Ph: 9876543210
-Garment: Regular Formal Shirt x 2
-Ch: 40 | W: 34 | Sh: 18.5 | Slv: 25 | N: 16 | AH: 19 | L: 29.5
-Pant: W: 34 | H: 40 | Th: 24 | Kn: 18 | B: 16 | Pant L: 41
-Rate: 1600 | Adv: 1000 | Bal: 600
-Date: 14/08/2023 | Delivery: 22/08/2023
-Notes: Double pocket with flap, French cuff, Slim fit
-
---------------------------------------------------
-Customer 2:
-Name: Suresh Babu
-Ph: 9988776655
-Garment: Wedding Kurta Set
-Ch: 42 | W: 36 | Sh: 19 | Slv: 26 | N: 16.5 | L: 42
-Pyjama: W: 36 | H: 42 | B: 15 | L: 40
-Rate: 2200 | Adv: 1500 | Bal: 700
-Date: 20/09/2023 | Delivery: 30/09/2023
-Notes: Mandarin collar with golden zari buttons, Side pockets
---------------------------------------------------
-`;
-    } else if (imageUrlOrBase64.includes('unclear_handwriting') || imageUrlOrBase64.includes('sample3')) {
-      rawText = `
-OLD REGISTER 2019
-Name: Venkateshwarlu G
-Phone: 9848?2110?
-Garment: Safari Suit
-Ch 44 | W 38 | Sh 19.5 | SL 24.? | N 17 | L 30
-Pant: W 38 | H 44 | Th 26 | B 17 | L 40.5
-Rate: 1800 | Adv: 800 | Bal: 1000
-Notes: Light grey fabric provided, 2 chest pockets
-`;
-    } else {
-      rawText = `
-ROYAL TAILORS RECORD - 2021
-Customer: Subba Rao Naidu
-Phone: 9849155200
-Alt Ph: 9440112233
-Address: Plot 45, Jubilee Hills, Hyderabad
-Garment: Premium Silk Kurta
-Chest: 42
-Waist: 36
-Shoulder: 18.5
-Sleeve: 25.5
-Neck: 16.5
-Armhole: 19.5
-Shirt Length: 40
-Hip: 42
-Bottom: 16
-Pant Length: 40
-Price: 1500
-Advance: 1000
-Balance: 500
-Order Date: 12/05/2021
-Delivery Date: 20/05/2021
-Instructions: Hand embroidery on right collar & sleeve hem, side pocket
-`;
-    }
-
-    const lines = rawText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .map((text) => ({
-        text,
-        confidence: text.includes('?') ? 0.58 : 0.94
-      }));
-
-    return {
-      rawText,
-      provider: 'TailorHub Built-in Pattern OCR Engine v2.0',
-      lines
-    };
   }
 }
 
@@ -147,24 +167,47 @@ export class LensExtractionService {
   private ocrProvider: LensOCRProvider;
 
   constructor(provider?: LensOCRProvider) {
-    this.ocrProvider = provider || new TesseractOCRProvider();
+    if (provider) {
+      this.ocrProvider = provider;
+    } else if (process.env.GEMINI_API_KEY && (process.env.OCR_PROVIDER === 'gemini' || !process.env.OCR_PROVIDER)) {
+      this.ocrProvider = new GeminiVisionOCRProvider(process.env.GEMINI_API_KEY);
+    } else {
+      this.ocrProvider = new TesseractOCRProvider();
+    }
+  }
+
+  getProviderInfo(): { provider: string; isAiVision: boolean } {
+    if (this.ocrProvider instanceof GeminiVisionOCRProvider) {
+      return { provider: 'Google Gemini 1.5 Flash Multimodal Vision', isAiVision: true };
+    }
+    return { provider: 'Tesseract.js Neural OCR Engine', isAiVision: false };
   }
 
   async processDocumentScan(imageUrlOrBase64: string): Promise<{
     rawText: string;
     provider: string;
     candidates: ExtractedCustomerCandidate[];
+    isAiVision: boolean;
   }> {
+    if (!imageUrlOrBase64 || !imageUrlOrBase64.trim()) {
+      throw new Error('Image URL or Base64 image data is required for Lens OCR.');
+    }
+
     const ocrResult = await this.ocrProvider.extractText(imageUrlOrBase64);
     const candidates = this.extractCandidatesFromText(ocrResult.rawText);
 
     return {
       rawText: ocrResult.rawText,
       provider: ocrResult.provider,
-      candidates
+      candidates,
+      isAiVision: Boolean(ocrResult.isAiVision)
     };
   }
 
+  /**
+   * Domain-specific tailoring lexer & parser.
+   * Can be invoked directly with transcribed text.
+   */
   extractCandidatesFromText(rawText: string): ExtractedCustomerCandidate[] {
     const segments = this.splitIntoCustomerSegments(rawText);
     const candidates: ExtractedCustomerCandidate[] = [];
@@ -222,7 +265,6 @@ export class LensExtractionService {
     const upper: UpperBodyMeasurements = {};
     const lower: LowerBodyMeasurements = {};
 
-    // Process both full lines and pipe-separated sub-tokens
     const tokens: string[] = [];
     rawLines.forEach((l) => {
       tokens.push(l);
@@ -242,7 +284,7 @@ export class LensExtractionService {
           confidences.name = {
             field: 'name',
             value: name,
-            confidence: hasUncertain ? 0.65 : 0.96,
+            confidence: hasUncertain ? 0.60 : 0.95,
             is_uncertain: hasUncertain
           };
         }
@@ -300,14 +342,14 @@ export class LensExtractionService {
       this.extractMeasurementValue(line, /(?:Chest|Chst|Ch|C)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!upper.chest) {
           upper.chest = val;
-          confidences.chest = { field: 'chest', value: String(val), confidence: uncertain ? 0.6 : 0.94, is_uncertain: uncertain };
+          confidences.chest = { field: 'chest', value: String(val), confidence: uncertain ? 0.60 : 0.94, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Shoulder|Shld|Sh|Tera)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!upper.shoulder) {
           upper.shoulder = val;
-          confidences.shoulder = { field: 'shoulder', value: String(val), confidence: uncertain ? 0.6 : 0.93, is_uncertain: uncertain };
+          confidences.shoulder = { field: 'shoulder', value: String(val), confidence: uncertain ? 0.60 : 0.93, is_uncertain: uncertain };
         }
       });
 
@@ -328,14 +370,14 @@ export class LensExtractionService {
       this.extractMeasurementValue(line, /(?:Armhole|AH|Arm|Muddha)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!upper.armhole) {
           upper.armhole = val;
-          confidences.armhole = { field: 'armhole', value: String(val), confidence: uncertain ? 0.6 : 0.91, is_uncertain: uncertain };
+          confidences.armhole = { field: 'armhole', value: String(val), confidence: uncertain ? 0.60 : 0.91, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Shirt\s*L|Kurta\s*L|Length|L)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!upper.shirt_length && val > 20 && val < 50) {
           upper.shirt_length = val;
-          confidences.shirt_length = { field: 'shirt_length', value: String(val), confidence: uncertain ? 0.6 : 0.92, is_uncertain: uncertain };
+          confidences.shirt_length = { field: 'shirt_length', value: String(val), confidence: uncertain ? 0.60 : 0.92, is_uncertain: uncertain };
         }
       });
 
@@ -343,42 +385,42 @@ export class LensExtractionService {
       this.extractMeasurementValue(line, /(?:Waist|W|Kamar)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.waist) {
           lower.waist = val;
-          confidences.waist = { field: 'waist', value: String(val), confidence: uncertain ? 0.6 : 0.94, is_uncertain: uncertain };
+          confidences.waist = { field: 'waist', value: String(val), confidence: uncertain ? 0.60 : 0.94, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Hip|Seat|H)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.hip) {
           lower.hip = val;
-          confidences.hip = { field: 'hip', value: String(val), confidence: uncertain ? 0.6 : 0.92, is_uncertain: uncertain };
+          confidences.hip = { field: 'hip', value: String(val), confidence: uncertain ? 0.60 : 0.92, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Thigh|Th|Jhaang|Raan)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.thigh) {
           lower.thigh = val;
-          confidences.thigh = { field: 'thigh', value: String(val), confidence: uncertain ? 0.6 : 0.9, is_uncertain: uncertain };
+          confidences.thigh = { field: 'thigh', value: String(val), confidence: uncertain ? 0.60 : 0.90, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Knee|Kn|Ghutna)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.knee) {
           lower.knee = val;
-          confidences.knee = { field: 'knee', value: String(val), confidence: uncertain ? 0.6 : 0.89, is_uncertain: uncertain };
+          confidences.knee = { field: 'knee', value: String(val), confidence: uncertain ? 0.60 : 0.89, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Bottom|B|Morri|Mori|Pancha)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.bottom) {
           lower.bottom = val;
-          confidences.bottom = { field: 'bottom', value: String(val), confidence: uncertain ? 0.6 : 0.91, is_uncertain: uncertain };
+          confidences.bottom = { field: 'bottom', value: String(val), confidence: uncertain ? 0.60 : 0.91, is_uncertain: uncertain };
         }
       });
 
       this.extractMeasurementValue(line, /(?:Pant\s*L|Pant\s*Length|Outseam)\s*[:=-]?\s*([0-9.]+)(\?)?/i, (val, uncertain) => {
         if (!lower.pant_length && val >= 35) {
           lower.pant_length = val;
-          confidences.pant_length = { field: 'pant_length', value: String(val), confidence: uncertain ? 0.6 : 0.93, is_uncertain: uncertain };
+          confidences.pant_length = { field: 'pant_length', value: String(val), confidence: uncertain ? 0.60 : 0.93, is_uncertain: uncertain };
         }
       });
 
@@ -407,13 +449,13 @@ export class LensExtractionService {
       const dateMatch = line.match(/(?:Date|Order\s*Date)\s*[:=-]?\s*([0-9/.-]{8,12})/i);
       if (dateMatch && !orderDate) {
         orderDate = dateMatch[1].trim();
-        confidences.order_date = { field: 'order_date', value: orderDate, confidence: 0.9 };
+        confidences.order_date = { field: 'order_date', value: orderDate, confidence: 0.90 };
       }
 
       const delMatch = line.match(/(?:Delivery|Del|D\/D|Due)\s*[:=-]?\s*([0-9/.-]{8,12})/i);
       if (delMatch && !deliveryDate) {
         deliveryDate = delMatch[1].trim();
-        confidences.delivery_date = { field: 'delivery_date', value: deliveryDate, confidence: 0.9 };
+        confidences.delivery_date = { field: 'delivery_date', value: deliveryDate, confidence: 0.90 };
       }
 
       // 8. Notes
@@ -421,18 +463,27 @@ export class LensExtractionService {
       if (notesMatch && !notes) {
         notes = notesMatch[1].trim();
         stitchingInstructions = notes;
-        confidences.notes = { field: 'notes', value: notes, confidence: 0.9 };
+        confidences.notes = { field: 'notes', value: notes, confidence: 0.90 };
       }
     });
 
     if (!name) {
       name = 'Customer (Unlabeled Entry)';
-      confidences.name = { field: 'name', value: name, confidence: 0.5, is_uncertain: true };
+      confidences.name = { field: 'name', value: name, confidence: 0.50, is_uncertain: true };
     }
 
     if (!garmentType) {
       garmentType = upper.chest ? 'Shirt' : 'Pant';
     }
+
+    // Attach human verification hint for low-confidence fields (< 0.70)
+    Object.keys(confidences).forEach((key) => {
+      const fieldConf = confidences[key];
+      if (fieldConf && (fieldConf.confidence < 0.70 || fieldConf.is_uncertain)) {
+        fieldConf.is_uncertain = true;
+        (fieldConf as any).verification_hint = 'Please verify this measurement';
+      }
+    });
 
     const confValues = Object.values(confidences).map((c) => c.confidence);
     const overallConfidence = confValues.length > 0

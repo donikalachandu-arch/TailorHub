@@ -79,11 +79,27 @@ async function runBackendTests() {
   const timeline = await db.all('SELECT * FROM order_status_history WHERE order_id = ?', [order.id]);
   console.log(`[TEST 8 PASSED] Order ${order.order_number} Status: ${order.status}, Timeline events: ${timeline.length}`);
 
-  // Test 9: Real Tesseract OCR & Shorthand Lexer
+  // Test 9: Real Tailoring Register Domain Lexer & OCR Parser
   const lens = new LensExtractionService();
-  const multiScan = await lens.processDocumentScan('sample_multi_customer.jpg');
-  console.log(`[TEST 9 PASSED] Lens Multi-Customer Detection: ${multiScan.candidates.length} candidates segmented.`);
-  if (multiScan.candidates.length < 2) throw new Error('Multi-customer detection failed');
+  const sampleRegister = `
+TAILOR REGISTER BOOK - PAGE 42
+Customer 1:
+Name: Ramesh Kumar
+Ph: 9876543210
+Garment: Regular Formal Shirt x 2
+Ch: 40 | W: 34 | Sh: 18.5 | Slv: 25 | N: 16 | AH: 19 | L: 29.5
+Rate: 1600 | Adv: 1000 | Bal: 600
+--------------------------------------------------
+Customer 2:
+Name: Suresh Babu
+Ph: 9988776655
+Garment: Wedding Kurta Set
+Ch: 42 | W: 36 | Sh: 19 | Slv: 26 | N: 16.5 | L: 42
+Rate: 2200 | Adv: 1500 | Bal: 700
+`;
+  const candidates = lens.extractCandidatesFromText(sampleRegister);
+  console.log(`[TEST 9 PASSED] Lens Multi-Customer Detection: ${candidates.length} candidates segmented.`);
+  if (candidates.length < 2) throw new Error('Multi-customer detection failed');
 
   // Test 10: Razorpay Cryptographic HMAC-SHA256
   const rzpOrder = await paymentGatewayService.createPaymentOrder({

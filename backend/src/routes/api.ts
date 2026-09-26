@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { getDatabase } from '../config/database';
@@ -14,6 +14,9 @@ export const apiRouter = Router();
 
 const lensService = new LensExtractionService();
 const JWT_SECRET = process.env.JWT_SECRET || 'tailorhub_super_secret_jwt_key_2026_production';
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  console.warn('⚠️ [SECURITY AUDIT] JWT_SECRET environment variable is missing in production environment!');
+}
 let activeWebsocketClients: Set<any> = new Set();
 
 export function setWebSocketClients(clients: Set<any>) {
@@ -604,6 +607,10 @@ apiRouter.patch('/orders/:id/status', authenticateToken, async (req: Authenticat
 // -------------------------------------------------------------
 // 6. TAILORHUB LENS — AI OLD RECORD DIGITIZATION & OCR
 // -------------------------------------------------------------
+apiRouter.get('/lens/provider-status', (req: Request, res: Response) => {
+  res.json(lensService.getProviderInfo());
+});
+
 apiRouter.post('/lens/scan', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { image_url, enhanced_image_url } = req.body;
@@ -1203,9 +1210,13 @@ apiRouter.patch('/old-records/:id/verify', authenticateToken, async (req: Authen
 // -------------------------------------------------------------
 // 7. REAL AI STYLE ASSISTANT (GEMINI LLM + BESPOKE TAILORING ONTOLOGY)
 // -------------------------------------------------------------
+apiRouter.get('/ai/provider-status', (req: Request, res: Response) => {
+  res.json(aiStyleService.getProviderStatus());
+});
+
 apiRouter.post('/ai/style-recommendation', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { garment, occasion, color_preference, sleeve_preference, neck_preference, fit_preference, notes, order_id } = req.body;
+    const { garment, occasion, color_preference, sleeve_preference, neck_preference, fit_preference, fabric, notes, order_id, strict_ai } = req.body;
     const db = await getDatabase();
 
     const inputData = {
@@ -1215,13 +1226,15 @@ apiRouter.post('/ai/style-recommendation', authenticateToken, async (req: Authen
       sleeve_preference,
       neck_preference,
       fit_preference,
+      fabric,
       notes
     };
 
     const structuredRecommendation = await aiStyleService.generateStyleRecommendation(
       inputData,
       req.user!.id,
-      order_id
+      order_id,
+      { strictAi: Boolean(strict_ai) }
     );
 
     const savedRec = await aiStyleService.saveRecommendation(
@@ -1246,11 +1259,15 @@ apiRouter.post('/ai/style-recommendation', authenticateToken, async (req: Authen
 // -------------------------------------------------------------
 // 8. REAL RAZORPAY PAYMENT GATEWAY & SECURE WEBHOOKS
 // -------------------------------------------------------------
+apiRouter.get('/payments/gateway-status', (req: Request, res: Response) => {
+  res.json(paymentGatewayService.getGatewayStatus());
+});
+
 apiRouter.post('/payments/create-order', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { order_id, amount } = req.body;
-    if (!order_id || !amount || amount <= 0) {
-      return res.status(400).json({ error: 'Valid order_id and amount are required.' });
+    if (!order_id) {
+      return res.status(400).json({ error: 'order_id is required.' });
     }
 
     const db = await getDatabase();
@@ -1259,11 +1276,25 @@ apiRouter.post('/payments/create-order', authenticateToken, async (req: Authenti
       return res.status(404).json({ error: 'Order not found.' });
     }
 
+    // SERVER-SIDE AMOUNT CALCULATION:
+    // Customer cannot arbitrary alter the total or payable balance.
+    // If balance_amount > 0, maximum payable is balance_amount.
+    // If order is completely paid, reject.
+    const orderBalance = Number(order.balance_amount ?? order.total_amount);
+    if (orderBalance <= 0) {
+      return res.status(400).json({ error: 'This order has already been fully paid.' });
+    }
+
+    // Allow paying requested installment if specified, but cap strictly at remaining balance
+    const serverCalculatedAmount = (amount && Number(amount) > 0)
+      ? Math.min(Number(amount), orderBalance)
+      : orderBalance;
+
     const rzpOrder = await paymentGatewayService.createPaymentOrder({
       orderId: order_id,
       customerId: req.user!.id,
       tailorId: order.tailor_id,
-      amount: Number(amount),
+      amount: serverCalculatedAmount,
       notes: { orderNumber: order.order_number }
     });
 
@@ -1272,7 +1303,9 @@ apiRouter.post('/payments/create-order', authenticateToken, async (req: Authenti
       amount: rzpOrder.amount,
       currency: rzpOrder.currency,
       key_id: rzpOrder.key_id,
-      order_id
+      order_id,
+      calculated_amount_inr: serverCalculatedAmount,
+      gateway_mode: paymentGatewayService.getGatewayStatus().mode
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Payment order creation failed' });
@@ -1287,6 +1320,7 @@ apiRouter.post('/payments/verify-signature', authenticateToken, async (req: Auth
     const order = await db.get('SELECT * FROM orders WHERE id = ?', [order_id]);
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
+    // Server-side verification of cryptographic HMAC signature
     const isValid = paymentGatewayService.verifyPaymentSignature(
       razorpay_order_id,
       razorpay_payment_id,
@@ -1297,11 +1331,17 @@ apiRouter.post('/payments/verify-signature', authenticateToken, async (req: Auth
       return res.status(400).json({ error: 'Invalid payment signature. Verification failed.' });
     }
 
+    // Server-side calculated settlement amount
+    const orderBalance = Number(order.balance_amount ?? order.total_amount);
+    const settledAmount = (amount && Number(amount) > 0)
+      ? Math.min(Number(amount), orderBalance > 0 ? orderBalance : Number(order.total_amount))
+      : (orderBalance > 0 ? orderBalance : Number(order.total_amount));
+
     const paymentRecord = await paymentGatewayService.processSuccessfulPayment(db, {
       orderId: order_id,
       customerId: req.user!.id,
       tailorId: order.tailor_id,
-      amount: Number(amount) || order.total_amount,
+      amount: settledAmount,
       transactionId: razorpay_payment_id,
       paymentMethod: 'RAZORPAY'
     });
@@ -1311,14 +1351,15 @@ apiRouter.post('/payments/verify-signature', authenticateToken, async (req: Auth
 
     res.status(200).json({
       message: 'Payment verified and credited successfully',
-      payment: paymentRecord
+      payment: paymentRecord,
+      gateway_mode: paymentGatewayService.getGatewayStatus().mode
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Signature verification failed' });
   }
 });
 
-apiRouter.post('/payments/webhook', async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/payments/webhook', async (req: Request, res: Response) => {
   try {
     const signature = req.headers['x-razorpay-signature'] as string;
     const rawBody = JSON.stringify(req.body);
@@ -1350,6 +1391,41 @@ apiRouter.post('/payments/webhook', async (req: AuthenticatedRequest, res: Respo
     }
 
     res.status(200).json({ status: 'ok', received: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/payments/refund', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { payment_id, order_id, refund_amount, reason } = req.body;
+    if (!payment_id || !order_id || !refund_amount || refund_amount <= 0) {
+      return res.status(400).json({ error: 'payment_id, order_id, and positive refund_amount are required.' });
+    }
+
+    const db = await getDatabase();
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [order_id]);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    // Authorization: Only Admin or the order's Tailor can issue a refund
+    const tailorProfile = await db.get('SELECT id FROM tailor_profiles WHERE user_id = ?', [req.user!.id]);
+    const isTailorOwner = tailorProfile && tailorProfile.id === order.tailor_id;
+    const isAdmin = req.user!.role === 'ADMIN';
+
+    if (!isTailorOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Unauthorized. Only the servicing tailor or admin can issue refunds.' });
+    }
+
+    const refundResult = await paymentGatewayService.processRefund(db, {
+      paymentId: payment_id,
+      orderId: order_id,
+      refundAmount: Number(refund_amount),
+      reason: reason || 'Customer requested adjustment / cancellation',
+      actorId: req.user!.id
+    });
+
+    broadcastWebSocketEvent(`order:${order_id}`, 'PAYMENT_REFUNDED', { order_id, payment_id, refundResult });
+    res.json({ message: 'Refund processed successfully', refundResult });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

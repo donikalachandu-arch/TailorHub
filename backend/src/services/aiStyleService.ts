@@ -10,43 +10,61 @@ export const AIStyleResponseSchema = z.object({
   pattern_suggestion: z.string().min(3),
   color_combination: z.string().min(3),
   occasion_suitability: z.string().min(3),
-  styling_tips: z.array(z.string()).min(1)
+  styling_tips: z.array(z.string()).min(1),
+  fabric_recommendation: z.string().optional(),
+  provider: z.string().default('Bespoke Fashion Ontology Engine'),
+  is_ai_generated: z.boolean().default(false)
 });
 
 export type AIStyleStructuredResponse = z.infer<typeof AIStyleResponseSchema>;
 
 export class AIStyleService {
   private geminiApiKey?: string;
-  private openAiApiKey?: string;
 
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
-    this.openAiApiKey = process.env.OPENAI_API_KEY;
+  }
+
+  getProviderStatus(): {
+    isConfigured: boolean;
+    provider: string;
+    model: string;
+    mode: 'LIVE_LLM' | 'RULE_ONTOLOGY_FALLBACK';
+  } {
+    const isConfigured = Boolean(this.geminiApiKey && this.geminiApiKey.length > 10);
+    return {
+      isConfigured,
+      provider: isConfigured ? 'Google Gemini' : 'Bespoke Fashion Ontology (Rule Engine)',
+      model: isConfigured ? 'gemini-1.5-flash' : 'ontology-v2.0',
+      mode: isConfigured ? 'LIVE_LLM' : 'RULE_ONTOLOGY_FALLBACK'
+    };
   }
 
   /**
-   * Generate live tailoring style recommendation
+   * Generate style recommendation considering garment, occasion, fabric, fit, and styling preferences
    */
   async generateStyleRecommendation(
     input: AIStyleInput,
     customerId: string,
-    orderId?: string
+    orderId?: string,
+    options: { strictAi?: boolean } = {}
   ): Promise<AIStyleStructuredResponse> {
     const garmentLower = (input.garment || 'shirt').toLowerCase();
     const occasionLower = (input.occasion || 'casual').toLowerCase();
 
-    // 1. Live LLM Integration (Google Gemini API) if available
+    // 1. Live LLM Integration (Google Gemini API) if configured
     if (this.geminiApiKey) {
       try {
-        const prompt = `You are a master bespoke tailor and master fashion designer.
+        const prompt = `You are a master bespoke tailor and fashion design director.
 Provide professional tailoring and design recommendations for the following client request:
-Garment: ${input.garment}
+Garment Type: ${input.garment}
 Occasion: ${input.occasion}
-Color Preference: ${input.color_preference || 'Any complement'}
-Neck Preference: ${input.neck_preference || 'Standard'}
+Color Preference: ${input.color_preference || 'Complementary tone'}
+Neck / Collar Preference: ${input.neck_preference || 'Standard'}
 Sleeve Preference: ${input.sleeve_preference || 'Standard'}
-Fit Preference: ${input.fit_preference || 'Slim/Tailored'}
-Notes: ${input.notes || 'None'}
+Fit Preference: ${input.fit_preference || 'Tailored / Slim'}
+Fabric: ${input.fabric || 'Client choice / Premium mill'}
+Client Notes: ${input.notes || 'None'}
 
 Return ONLY a valid JSON object matching this schema:
 {
@@ -56,7 +74,8 @@ Return ONLY a valid JSON object matching this schema:
   "pattern_suggestion": "string",
   "color_combination": "string",
   "occasion_suitability": "string",
-  "styling_tips": ["string", "string", "string"]
+  "styling_tips": ["string", "string", "string"],
+  "fabric_recommendation": "string"
 }`;
 
         const response = await fetch(
@@ -79,18 +98,31 @@ Return ONLY a valid JSON object matching this schema:
           const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (candidateText) {
             const parsed = JSON.parse(candidateText);
-            const validated = AIStyleResponseSchema.safeParse(parsed);
+            const validated = AIStyleResponseSchema.safeParse({
+              ...parsed,
+              provider: 'Google Gemini 1.5 Flash LLM',
+              is_ai_generated: true
+            });
             if (validated.success) {
               return validated.data;
             }
           }
         }
       } catch (err) {
-        console.warn('[AIStyleService] Gemini inference fallback to bespoke fashion ontology engine:', err);
+        console.warn('[AIStyleService] Live Gemini inference error:', err);
+        if (options.strictAi) {
+          throw new Error('AI Style Assistant service is currently unavailable. Please try again later.');
+        }
       }
     }
 
-    // 2. High Precision Tailoring Fashion Ontology Rule Engine
+    if (options.strictAi && !this.geminiApiKey) {
+      throw new Error(
+        'Generative AI Style Assistant is not configured. GEMINI_API_KEY environment variable is required for generative LLM responses.'
+      );
+    }
+
+    // 2. High Precision Tailoring Fashion Ontology Rule Engine (Explicitly Labelled as Rule-Based)
     return this.generateOntologyRecommendation(garmentLower, occasionLower, input);
   }
 
@@ -102,16 +134,19 @@ Return ONLY a valid JSON object matching this schema:
     if (garment.includes('kurta') || garment.includes('sherwani')) {
       return {
         title: occasion.includes('wedding') ? 'Royal Heritage Asymmetric Kurta' : 'Contemporary Bandhgala Kurta',
-        neck_design: input.neck_preference || 'Mandarin collar with intricate contrast thread piping and metallic monogram buttons',
-        sleeve_design: input.sleeve_preference || 'Full sleeve with 2.5-inch French cuff and button placket',
-        pattern_suggestion: occasion.includes('wedding') ? 'Subtle self-jacquard silk with tone-on-tone thread embroidery' : 'Solid linen-silk blend with side concealed placket',
+        neck_design: input.neck_preference || 'Mandarin collar with contrast thread piping and antique metallic buttons',
+        sleeve_design: input.sleeve_preference || 'Full sleeve with 2.5-inch French cuff and concealed button placket',
+        pattern_suggestion: occasion.includes('wedding') ? 'Subtle self-jacquard silk with tone-on-tone embroidery' : 'Solid linen-silk blend with side concealed slit',
         color_combination: input.color_preference || 'Deep Ivory with Raw Silk Antique Gold accents and churidar pairing',
         occasion_suitability: `Perfect for ${occasion || 'festive celebrations'}, family functions, and evening galas`,
         styling_tips: [
           'Pair with mojris in matching raw silk or antique tan leather',
           'Add a folded silk pocket square for a regal touch',
           'Opt for churidar or straight pants with a 1.5-inch hem break'
-        ]
+        ],
+        fabric_recommendation: 'Pure Tussar Silk or 80-count Linen with hand-spun cotton lining',
+        provider: 'Bespoke Fashion Ontology Engine (Rule-based)',
+        is_ai_generated: false
       };
     }
 
@@ -127,7 +162,10 @@ Return ONLY a valid JSON object matching this schema:
           'Ensure 4-inch back tie-up latkans with matching pearls',
           'Include princess cut darting for seamless bust contouring',
           'Reinforce neckline with canvas fusing to preserve sharp shape'
-        ]
+        ],
+        fabric_recommendation: 'Raw Mulberry Silk with pure cotton canvas inner fusing',
+        provider: 'Bespoke Fashion Ontology Engine (Rule-based)',
+        is_ai_generated: false
       };
     }
 
@@ -143,7 +181,10 @@ Return ONLY a valid JSON object matching this schema:
           'Jacket should cover seat with a double vent for mobility and drape',
           'Trousers tailored with slight break and 1.5-inch bottom cuff',
           'Use genuine cupro lining for breathable thermal comfort'
-        ]
+        ],
+        fabric_recommendation: 'Super 130s Merino Wool with natural horsehair canvas chest piece',
+        provider: 'Bespoke Fashion Ontology Engine (Rule-based)',
+        is_ai_generated: false
       };
     }
 
@@ -159,7 +200,10 @@ Return ONLY a valid JSON object matching this schema:
         'Add 0.5-inch chest ease for effortless movement and posture comfort',
         'Back yoke split at 45-degree bias to eliminate shoulder pulling',
         'Reinforce side gussets with embroidered pentagonal fabric shields'
-      ]
+      ],
+      fabric_recommendation: '100% 2-ply Egyptian Long-Staple Giza Cotton (120/2 yarn count)',
+      provider: 'Bespoke Fashion Ontology Engine (Rule-based)',
+      is_ai_generated: false
     };
   }
 
