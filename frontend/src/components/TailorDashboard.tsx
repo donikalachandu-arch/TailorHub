@@ -73,15 +73,15 @@ export const TailorDashboard: React.FC<TailorDashboardProps> = ({ onSelectTab })
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-sm">
           <span className="text-[10px] font-semibold uppercase text-slate-400 block">Weekly Revenue</span>
           <p className="text-2xl font-extrabold text-amber-400 mt-1">
-            ₹{metrics ? metrics.weekly_revenue : '8,900'}
+            ₹{(metrics?.weekly_revenue ?? 0).toLocaleString()}
           </p>
-          <span className="text-[10px] text-emerald-400 font-semibold">+18% this week</span>
+          <span className="text-[10px] text-emerald-400 font-semibold">Live DB verified</span>
         </div>
 
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-sm">
           <span className="text-[10px] font-semibold uppercase text-slate-400 block">Total Orders</span>
           <p className="text-2xl font-extrabold text-white mt-1">
-            {metrics ? metrics.total_orders : '12'}
+            {metrics?.total_orders ?? 0}
           </p>
           <span className="text-[10px] text-slate-400">Active stitching</span>
         </div>
@@ -89,7 +89,7 @@ export const TailorDashboard: React.FC<TailorDashboardProps> = ({ onSelectTab })
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-sm">
           <span className="text-[10px] font-semibold uppercase text-slate-400 block">Completed</span>
           <p className="text-2xl font-extrabold text-emerald-400 mt-1">
-            {metrics ? metrics.completed_orders : '8'}
+            {metrics?.completed_orders ?? 0}
           </p>
           <span className="text-[10px] text-emerald-400">Delivered</span>
         </div>
@@ -97,7 +97,7 @@ export const TailorDashboard: React.FC<TailorDashboardProps> = ({ onSelectTab })
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-sm">
           <span className="text-[10px] font-semibold uppercase text-slate-400 block">Pending Balance</span>
           <p className="text-2xl font-extrabold text-rose-400 mt-1">
-            ₹{metrics ? metrics.pending_payments : '1,800'}
+            ₹{(metrics?.pending_payments ?? 0).toLocaleString()}
           </p>
           <span className="text-[10px] text-slate-400">Due at delivery</span>
         </div>

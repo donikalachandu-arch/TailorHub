@@ -45,7 +45,7 @@ app.use('/api/auth', authLimiter);
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-razorpay-signature']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-razorpay-signature', 'x-tailorhub-mode', 'X-TailorHub-Mode']
 }));
 
 app.use(express.json({ limit: '50mb' }));

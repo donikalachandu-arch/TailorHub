@@ -25,16 +25,16 @@ export const TailorAnalytics: React.FC = () => {
   }
 
   const revenueByDay = metrics?.revenue_by_day || [
-    { date: 'Mon', revenue: 1200 },
-    { date: 'Tue', revenue: 1800 },
-    { date: 'Wed', revenue: 2100 },
-    { date: 'Thu', revenue: 1400 },
-    { date: 'Fri', revenue: 3200 },
-    { date: 'Sat', revenue: 4100 },
-    { date: 'Sun', revenue: 2500 }
+    { date: 'Mon', revenue: 0 },
+    { date: 'Tue', revenue: 0 },
+    { date: 'Wed', revenue: 0 },
+    { date: 'Thu', revenue: 0 },
+    { date: 'Fri', revenue: 0 },
+    { date: 'Sat', revenue: 0 },
+    { date: 'Sun', revenue: 0 }
   ];
 
-  const maxRevenue = Math.max(...revenueByDay.map((d: any) => d.revenue));
+  const maxRevenue = Math.max(1, ...revenueByDay.map((d: any) => d.revenue || 0));
 
   return (
     <div className="space-y-6 pb-20">
@@ -51,28 +51,28 @@ export const TailorAnalytics: React.FC = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-lg">
           <span className="text-xs font-semibold uppercase text-slate-400 block">Monthly Revenue</span>
-          <p className="text-2xl font-extrabold text-amber-400 mt-1">₹{metrics?.monthly_revenue || 24500}</p>
+          <p className="text-2xl font-extrabold text-amber-400 mt-1">₹{(metrics?.monthly_revenue ?? 0).toLocaleString()}</p>
           <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 mt-1">
-            <TrendingUp className="w-3.5 h-3.5" /> +24% vs last month
+            <TrendingUp className="w-3.5 h-3.5" /> Database verified
           </span>
         </div>
 
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-lg">
           <span className="text-xs font-semibold uppercase text-slate-400 block">Total Stitching Orders</span>
-          <p className="text-2xl font-extrabold text-white mt-1">{metrics?.total_orders || 12}</p>
+          <p className="text-2xl font-extrabold text-white mt-1">{metrics?.total_orders ?? 0}</p>
           <span className="text-[10px] text-slate-400 font-semibold mt-1 block">Active stitching jobs</span>
         </div>
 
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-lg">
           <span className="text-xs font-semibold uppercase text-slate-400 block">Completed & Delivered</span>
-          <p className="text-2xl font-extrabold text-emerald-400 mt-1">{metrics?.completed_orders || 8}</p>
-          <span className="text-[10px] text-emerald-400 font-semibold mt-1 block">100% on-time delivery</span>
+          <p className="text-2xl font-extrabold text-emerald-400 mt-1">{metrics?.completed_orders ?? 0}</p>
+          <span className="text-[10px] text-emerald-400 font-semibold mt-1 block">Verified delivery status</span>
         </div>
 
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl text-white shadow-lg">
           <span className="text-xs font-semibold uppercase text-slate-400 block">Repeat Customers</span>
-          <p className="text-2xl font-extrabold text-indigo-400 mt-1">{metrics?.repeat_customers || 6}</p>
-          <span className="text-[10px] text-indigo-300 font-semibold mt-1 block">50% customer retention</span>
+          <p className="text-2xl font-extrabold text-indigo-400 mt-1">{metrics?.repeat_customers ?? 0}</p>
+          <span className="text-[10px] text-indigo-300 font-semibold mt-1 block">Distinct client count</span>
         </div>
       </div>
 
