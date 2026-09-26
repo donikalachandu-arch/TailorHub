@@ -328,7 +328,6 @@ async function initSchema(db: Database) {
       FOREIGN KEY (tailor_id) REFERENCES tailor_profiles(id)
     );
 
-    -- Indices for high performance queries
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
     CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number);
@@ -336,11 +335,19 @@ async function initSchema(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_orders_tailor ON orders(tailor_id);
     CREATE INDEX IF NOT EXISTS idx_staff_tailor ON staff(tailor_id);
     CREATE INDEX IF NOT EXISTS idx_appointments_tailor ON appointments(tailor_id, date);
-    CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
-    CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id);
-    CREATE INDEX IF NOT EXISTS idx_scanned_tailor ON scanned_records(tailor_id);
-    CREATE INDEX IF NOT EXISTS idx_hist_orders_cust ON historical_orders(customer_id);
   `);
+
+  // Safe migration for is_demo and source columns
+  const tablesWithDemo = ['users', 'tailor_profiles', 'services', 'customers', 'measurements', 'orders', 'appointments', 'payments', 'ai_recommendations', 'scanned_records', 'historical_orders', 'reviews'];
+  for (const table of tablesWithDemo) {
+    try {
+      const cols = await db.all(`PRAGMA table_info(${table})`);
+      const hasDemo = cols.some((c: any) => c.name === 'is_demo');
+      if (!hasDemo) {
+        await db.exec(`ALTER TABLE ${table} ADD COLUMN is_demo INTEGER DEFAULT 0`);
+      }
+    } catch (e) {}
+  }
 
   // Safe migration for source column in measurements
   try {
@@ -349,7 +356,13 @@ async function initSchema(db: Database) {
     if (!hasSource) {
       await db.exec("ALTER TABLE measurements ADD COLUMN source TEXT DEFAULT 'MANUAL'");
     }
-  } catch (e) {
-    // Column already exists or error handled
-  }
+  } catch (e) {}
+
+  // Create demo indices after migration
+  try {
+    await db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_users_demo ON users(is_demo);
+      CREATE INDEX IF NOT EXISTS idx_orders_demo ON orders(is_demo);
+    `);
+  } catch (e) {}
 }

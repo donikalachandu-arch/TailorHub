@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ModeProvider } from './context/ModeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { VoiceProvider } from './context/VoiceContext';
@@ -175,13 +176,15 @@ const MainApp: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <LanguageProvider>
-        <VoiceProvider>
-          <MainApp />
-        </VoiceProvider>
-      </LanguageProvider>
-    </AuthProvider>
+    <ModeProvider>
+      <AuthProvider>
+        <LanguageProvider>
+          <VoiceProvider>
+            <MainApp />
+          </VoiceProvider>
+        </LanguageProvider>
+      </AuthProvider>
+    </ModeProvider>
   );
 };
 export default App;

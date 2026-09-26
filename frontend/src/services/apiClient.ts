@@ -1,6 +1,6 @@
 /**
  * TailorHub Production API Client
- * Robust, typed HTTP client with error handling, authentication, and live service endpoints.
+ * Robust, typed HTTP client with error handling, authentication, environment mode routing, and live service endpoints.
  */
 
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '') + '/api';
@@ -27,8 +27,11 @@ export async function apiRequest<T = any>(
   } = {}
 ): Promise<T> {
   const { method = 'GET', body, token, timeoutMs = 15000 } = options;
+  const currentMode = (localStorage.getItem('tailorhub_mode') || 'LIVE').toUpperCase();
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'X-TailorHub-Mode': currentMode === 'DEMO' ? 'demo' : 'live'
   };
 
   const storedToken = token || localStorage.getItem('tailorhub_token');
@@ -74,7 +77,7 @@ export async function apiRequest<T = any>(
     if (err instanceof ApiError) {
       throw err;
     }
-    throw new ApiError(err.message || 'Network error communicating with TailorHub server.', 500);
+    throw new ApiError(err.message || 'Unable to connect to TailorHub services. Please try again.', 500);
   }
 }
 
@@ -106,6 +109,17 @@ export const appointmentsApi = {
   bookAppointment: (data: any) => apiRequest('/appointments', { method: 'POST', body: data }),
   updateStatus: (id: string, status: string) =>
     apiRequest(`/appointments/${id}/status`, { method: 'PATCH', body: { status } })
+};
+
+export const tailorApi = {
+  getCustomers: (search?: string) =>
+    apiRequest(search ? `/tailor/customers?search=${encodeURIComponent(search)}` : '/tailor/customers'),
+  getCustomerDetails: (id: string) =>
+    apiRequest(`/tailor/customers/${id}`),
+  updateCustomer: (id: string, data: any) =>
+    apiRequest(`/tailor/customers/${id}`, { method: 'PATCH', body: data }),
+  addManualCustomer: (data: any) =>
+    apiRequest('/tailor/customers/manual', { method: 'POST', body: data })
 };
 
 export const lensApi = {
@@ -154,6 +168,19 @@ export const staffApi = {
     apiRequest(`/tailors/${tailorId}/staff`, { method: 'POST', body: staffData }),
   removeShopStaff: (tailorId: string, staffId: string) =>
     apiRequest(`/tailors/${tailorId}/staff/${staffId}`, { method: 'DELETE' })
+};
+
+export const adminApi = {
+  getUsers: () => apiRequest('/admin/users'),
+  getTailors: () => apiRequest('/admin/tailors'),
+  verifyTailor: (id: string) => apiRequest(`/admin/tailors/${id}/verify`, { method: 'PATCH' }),
+  getOrders: () => apiRequest('/admin/orders'),
+  getAuditLogs: () => apiRequest('/admin/audit-logs'),
+  resetDemoData: () => apiRequest('/admin/reset-demo', { method: 'POST' })
+};
+
+export const demoApi = {
+  resetDemoData: () => apiRequest('/demo/reset', { method: 'POST' })
 };
 
 export const analyticsApi = {
